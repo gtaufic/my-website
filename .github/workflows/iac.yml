@@ -1,0 +1,115 @@
+name: iac
+
+on:
+  pull_request:
+    branches: [develop, main]
+    types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Terraform operation for this branch's environment
+        type: choice
+        options: [plan, apply]
+        default: plan
+
+permissions:
+  contents: read
+
+# Use the PR target branch to share the environment's deployment lock.
+concurrency:
+  group: deploy-${{ github.base_ref || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  check-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require develop for dev or main for production
+        env:
+          TARGET_REF: ${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.base_ref) || github.ref }}
+        run: |
+          case "$TARGET_REF" in
+            refs/heads/develop|refs/heads/main) ;;
+            *) echo 'IaC requires develop (dev) or main (production), including PR targets.' >&2; exit 1 ;;
+          esac
+
+  validate:
+    needs: check-branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+      - run: terraform -chdir=iac fmt -check -recursive
+      - run: terraform -chdir=iac init -backend=false -input=false -lockfile=readonly
+      - run: terraform -chdir=iac validate
+      - run: bash -n scripts/deploy-website.sh
+      - run: bash -n scripts/terraform-init
+
+  iac:
+    needs: validate
+    # Fork PRs receive validation only, without cloud credentials.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ (github.base_ref == 'main' || github.ref == 'refs/heads/main') && 'production' || 'dev' }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_github_repository_id: ${{ github.repository_id }}
+      TF_VAR_github_repository_owner_id: ${{ github.repository_owner_id }}
+      TARGET_ENVIRONMENT: ${{ (github.base_ref == 'main' || github.ref == 'refs/heads/main') && 'production' || 'dev' }}
+    steps:
+      - name: Mask service-account emails
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          for environment in dev production; do
+            for account in iac web plan; do
+              echo "::add-mask::my-website-$environment-$account@$GCP_PROJECT_ID.iam.gserviceaccount.com"
+            done
+          done
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check project settings
+        env:
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          : "${GCP_PROJECT_ID:?Set the GitHub repository secret GCP_PROJECT_ID.}"
+          [[ "$GCP_PROJECT_NUMBER" =~ ^[0-9]+$ ]] || { echo 'Set the GitHub repository secret GCP_PROJECT_NUMBER.' >&2; exit 1; }
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/my-website-${{ env.TARGET_ENVIRONMENT }}-github/providers/github
+          service_account: my-website-${{ env.TARGET_ENVIRONMENT }}-${{ github.event_name == 'pull_request' && 'plan' || 'iac' }}@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+      - name: Initialize remote state
+        run: terraform -chdir=iac init -input=false -lockfile=readonly -backend-config="environments/$TARGET_ENVIRONMENT/state.hcl"
+      # PR credentials can read state but cannot create a lock or write state.
+      # The shared concurrency group keeps plans and deployments serialized.
+      - name: Plan pull request
+        if: github.event_name == 'pull_request'
+        run: terraform -chdir=iac plan -input=false -lock=false -var-file="environments/$TARGET_ENVIRONMENT/terraform.tfvars"
+      - name: Plan manual run
+        if: github.event_name == 'workflow_dispatch'
+        run: terraform -chdir=iac plan -input=false -lock-timeout=5m -var-file="environments/$TARGET_ENVIRONMENT/terraform.tfvars" -out=tfplan
+      - name: Apply
+        if: github.event_name == 'workflow_dispatch' && inputs.operation == 'apply'
+        run: terraform -chdir=iac apply -input=false -lock-timeout=5m tfplan
+      - name: Remove plan
+        if: always()
+        run: rm -f iac/tfplan
