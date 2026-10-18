@@ -16,29 +16,23 @@ flowchart LR
 
 There are two environments: `dev`, based on the `develop` branch, and `production`, based on the `main` branch.
 
+Apply IaC once per environment before its first deployment.
+
 ```mermaid
 flowchart TB
-    dev_pr["PR targeting develop"] -->|Automatic plan| dev_plan["IaC pipeline<br/>Automatic plan for dev"]
-    dev_pr -->|Merge PR| develop["develop branch · dev"]
-    develop -->|Website changes pushed or merged, or manual run| dev_website["deploy pipeline<br/>Deploy files + invalidate CDN"]
-    develop -->|Manual run| dev_iac["IaC pipeline<br/>Plan or apply for dev"]
-    develop -->|Open PR to main| production_pr["PR targeting main"]
-    production_pr -->|Automatic plan| production_plan["IaC pipeline<br/>Automatic plan for production"]
-    production_pr -->|Merge PR| main["main branch · production"]
-    main -->|Website changes pushed or merged, or manual run| production_website["deploy pipeline<br/>Deploy files + invalidate CDN"]
-    main -->|Manual run| production_iac["IaC pipeline<br/>Plan or apply for production"]
+    develop["develop · dev"] -->|PR: auto plan · Manual: plan / apply| dev_iac["IaC · dev"]
+    develop -->|Website push / merge, or manual| dev_deploy["Deploy · dev<br/>Upload → invalidate CDN → verify"]
+    develop -->|Merge PR to main| main["main · production"]
+    main -->|PR: auto plan · Manual: plan / apply| production_iac["IaC · production"]
+    main -->|Website push / merge, or manual| production_deploy["Deploy · production<br/>Upload → invalidate CDN → verify"]
 
     classDef dev fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
     classDef production fill:#ffedd5,stroke:#ea580c,color:#7c2d12
-    class dev_pr,dev_plan,develop,dev_website,dev_iac dev
-    class production_pr,production_plan,main,production_website,production_iac production
-
-    %% Operation colors: plan, merge, deploy, manual run, and open PR.
-    linkStyle 0,5 stroke:#2563eb,color:#2563eb,stroke-width:2px
-    linkStyle 1,6 stroke:#7c3aed,color:#7c3aed,stroke-width:2px
-    linkStyle 2,7 stroke:#0891b2,color:#0891b2,stroke-width:2px
-    linkStyle 3,8 stroke:#16a34a,color:#16a34a,stroke-width:2px
-    linkStyle 4 stroke:#d97706,color:#d97706,stroke-width:2px
+    class develop,dev_iac,dev_deploy dev
+    class main,production_iac,production_deploy production
+    linkStyle 0,3 stroke:#16a34a,color:#16a34a,stroke-width:2px
+    linkStyle 1,4 stroke:#0891b2,color:#0891b2,stroke-width:2px
+    linkStyle 2 stroke:#7c3aed,color:#7c3aed,stroke-width:2px
 ```
 
 Default region: `us-east1`.
@@ -52,7 +46,7 @@ my-website/
 │       ├── iac.yml                  # PR plans; manual plan and apply
 │       └── website.yml              # deploy: website files and CDN invalidation
 ├── docs/
-│   └── images/                      # README images
+│   └── images/                      # Step-by-step screenshots
 ├── iac/
 │   ├── .terraform.lock.hcl          # Provider versions and checksums (auto-gen)
 │   ├── state.tf                     # Remote state and protected state bucket
@@ -135,9 +129,31 @@ After bootstrap, allow up to five minutes for IAM permissions to propagate.
 2. Run **deploy** on `develop` to publish the HTML.
 3. Once these files are on `main`, repeat **iac → apply**, then **deploy**, on `main` for production.
 
-![Deployed website with the IP address blurred](docs/images/website-preview.png)
-
 The first apply imports the bootstrap resources and creates the hosting stack and deployment accounts, including the read-only PR plan account. Later website changes deploy automatically.
+
+**[First apply (production)](https://github.com/gtaufic/my-website/actions/runs/39148919451)**
+
+[![Successful first Terraform apply in production](docs/images/first-apply.png)](https://github.com/gtaufic/my-website/actions/runs/39148919451)
+
+**[First deploy (production)](https://github.com/gtaufic/my-website/actions/runs/39149186580)**
+
+[![First deployment to production in progress](docs/images/first-deploy.png)](https://github.com/gtaufic/my-website/actions/runs/39149186580)
+
+**Deployed version (production)**
+
+![Deployed website version 1.0.1 in production](docs/images/deployed-version.png)
+
+**Page update (v1.0.2)**
+
+Update the page version and replace the GIF, keeping its source credit.
+
+![HTML changes updating the page to version 1.0.2 and replacing the GIF](docs/images/page-update.png)
+
+**Automatic plan (dev)**
+
+Opening or updating a PR targeting `develop` runs a Terraform plan for dev. This website-only update requires no infrastructure changes.
+
+![Successful automatic Terraform plan for dev showing no infrastructure changes](docs/images/auto-plan.png)
 
 For an existing setup, run one manual **iac → apply** with these changes on each environment's branch before using automatic PR plans. This creates the plan account and updates federation.
 
