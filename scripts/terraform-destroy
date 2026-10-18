@@ -13,9 +13,19 @@ if [[ $# != 4 ]]; then
 fi
 
 # Cloud Shell may provide a placeholder that prints install instructions and exits 0.
-if ! terraform version 2>/dev/null | grep -q '^Terraform v'; then
-  echo "Terraform is not installed. Install Terraform 1.16.6, then rerun this script." >&2
-  exit 1
+terraform_command=terraform
+if ! "$terraform_command" version 2>/dev/null | grep -q '^Terraform v'; then
+  echo "Downloading Terraform 1.16.6 for Cloud Shell..."
+  terraform_directory=$(mktemp -d)
+  trap 'rm -rf "$terraform_directory"' EXIT
+  terraform_archive=terraform_1.16.6_linux_amd64.zip
+  curl -fsSL "https://releases.hashicorp.com/terraform/1.16.6/$terraform_archive" \
+    -o "$terraform_directory/$terraform_archive"
+  curl -fsSL https://releases.hashicorp.com/terraform/1.16.6/terraform_1.16.6_SHA256SUMS \
+    -o "$terraform_directory/terraform_1.16.6_SHA256SUMS"
+  (cd "$terraform_directory" && sha256sum --ignore-missing -c terraform_1.16.6_SHA256SUMS)
+  unzip -oq "$terraform_directory/$terraform_archive" -d "$terraform_directory"
+  terraform_command="$terraform_directory/terraform"
 fi
 
 export TF_VAR_project_id=$1
@@ -39,17 +49,17 @@ done
 # Keep both backends available until all Terraform operations finish.
 for environment in dev production; do
   echo "Preparing to destroy $environment..."
-  terraform -chdir="$iac_directory" init -input=false -reconfigure -lockfile=readonly \
+  "$terraform_command" -chdir="$iac_directory" init -input=false -reconfigure -lockfile=readonly \
     -backend-config="environments/$environment/state.hcl"
 
-  resources=$(terraform -chdir="$iac_directory" state list)
+  resources=$("$terraform_command" -chdir="$iac_directory" state list)
   if [[ -z "$resources" ]]; then
     echo "No managed resources in $environment."
     continue
   fi
 
   # Refuse to operate on another project's state.
-  state_project=$(terraform -chdir="$iac_directory" output -raw project_id)
+  state_project=$("$terraform_command" -chdir="$iac_directory" output -raw project_id)
   if [[ "$state_project" != "$TF_VAR_project_id" ]]; then
     echo "The $environment state belongs to a different project." >&2
     exit 1
@@ -57,7 +67,7 @@ for environment in dev production; do
 
   # Persist permission to delete website objects, including previous versions.
   if printf '%s\n' "$resources" | grep -Fxq 'module.static_website.google_storage_bucket.website'; then
-    terraform -chdir="$iac_directory" apply -input=false -auto-approve -lock-timeout=5m \
+    "$terraform_command" -chdir="$iac_directory" apply -input=false -auto-approve -lock-timeout=5m \
       -var-file="environments/$environment/terraform.tfvars" \
       -var=website_force_destroy=true \
       -target=module.static_website.google_storage_bucket.website
@@ -65,11 +75,11 @@ for environment in dev production; do
 
   # Bypass prevent_destroy; the backend bucket is deleted separately afterward.
   if printf '%s\n' "$resources" | grep -Fxq 'google_storage_bucket.state'; then
-    terraform -chdir="$iac_directory" state rm -lock-timeout=5m google_storage_bucket.state
+    "$terraform_command" -chdir="$iac_directory" state rm -lock-timeout=5m google_storage_bucket.state
   fi
 
   # Terraform displays the destruction plan and asks for confirmation.
-  terraform -chdir="$iac_directory" destroy -lock-timeout=5m \
+  "$terraform_command" -chdir="$iac_directory" destroy -lock-timeout=5m \
     -var-file="environments/$environment/terraform.tfvars" \
     -var=website_force_destroy=true
 done
