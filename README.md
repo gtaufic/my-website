@@ -181,7 +181,7 @@ Refreshed the page to confirm v1.0.2 and the new GIF.
 
 1. Support custom domains with DNS configuration and managed HTTPS certificates. Redirect HTTP traffic to HTTPS.
 2. Add CI with versioned web assets and deploy actual releases, with caching and rollbacks.
-3. Deploy and invalidate CDN cache only when website content differs from the currently deployed version.
+3. Deploy and invalidate CDN cache only when website content differs from the currently deployed version and after running regression tests.
 
 ## Solutions considered at the beginning
 
