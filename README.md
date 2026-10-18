@@ -19,36 +19,20 @@ There are two environments: `dev`, based on the `develop` branch, and `productio
 Apply IaC once per environment before its first deployment.
 
 ```mermaid
-flowchart LR
-    subgraph iac_lane["IaC"]
-        direction TB
-        iac_dev["develop · dev"] -->|PR to develop| dev_plan["Auto plan"]
-        iac_dev -->|Manual| dev_apply["Plan / apply"]
-        iac_dev -->|Merge PR to main| iac_prod["main · production"]
-        iac_prod -->|PR to main| prod_plan["Auto plan"]
-        iac_prod -->|Manual| prod_apply["Plan / apply"]
-    end
-
-    subgraph deploy_lane["Deploy"]
-        direction TB
-        deploy_dev["develop · dev"] -->|Website push / merge, or manual| dev_release["Upload → invalidate CDN → verify"]
-        deploy_dev -->|Merge PR to main| deploy_prod["main · production"]
-        deploy_prod -->|Website push / merge, or manual| prod_release["Upload → invalidate CDN → verify"]
-    end
-
-    iac_lane ~~~ deploy_lane
+flowchart TB
+    develop["develop · dev"] -->|PR: auto plan · Manual: plan / apply| dev_iac["IaC · dev"]
+    develop -->|Website push / merge, or manual| dev_deploy["Deploy · dev<br/>Upload → invalidate CDN → verify"]
+    develop -->|Merge PR to main| main["main · production"]
+    main -->|PR: auto plan · Manual: plan / apply| production_iac["IaC · production"]
+    main -->|Website push / merge, or manual| production_deploy["Deploy · production<br/>Upload → invalidate CDN → verify"]
 
     classDef dev fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
     classDef production fill:#ffedd5,stroke:#ea580c,color:#7c2d12
-    class iac_dev,dev_plan,dev_apply,deploy_dev,dev_release dev
-    class iac_prod,prod_plan,prod_apply,deploy_prod,prod_release production
-    style iac_lane fill:#f8fafc,stroke:#64748b,color:#0f172a
-    style deploy_lane fill:#f8fafc,stroke:#64748b,color:#0f172a
-
-    linkStyle 0,3 stroke:#2563eb,color:#2563eb,stroke-width:2px
-    linkStyle 1,4 stroke:#16a34a,color:#16a34a,stroke-width:2px
-    linkStyle 2,6 stroke:#7c3aed,color:#7c3aed,stroke-width:2px
-    linkStyle 5,7 stroke:#0891b2,color:#0891b2,stroke-width:2px
+    class develop,dev_iac,dev_deploy dev
+    class main,production_iac,production_deploy production
+    linkStyle 0,3 stroke:#16a34a,color:#16a34a,stroke-width:2px
+    linkStyle 1,4 stroke:#0891b2,color:#0891b2,stroke-width:2px
+    linkStyle 2 stroke:#7c3aed,color:#7c3aed,stroke-width:2px
 ```
 
 Default region: `us-east1`.
@@ -164,6 +148,12 @@ The first apply imports the bootstrap resources and creates the hosting stack an
 Update the page version and replace the GIF, keeping its source credit.
 
 ![HTML changes updating the page to version 1.0.2 and replacing the GIF](docs/images/page-update.png)
+
+**Automatic plan (dev)**
+
+Opening or updating a PR targeting `develop` runs a Terraform plan for dev. This website-only update requires no infrastructure changes.
+
+![Successful automatic Terraform plan for dev showing no infrastructure changes](docs/images/auto-plan.png)
 
 For an existing setup, run one manual **iac → apply** with these changes on each environment's branch before using automatic PR plans. This creates the plan account and updates federation.
 
