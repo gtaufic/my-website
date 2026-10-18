@@ -27,15 +27,14 @@ jobs:
       contents: read
       id-token: write
     env:
-      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_PROJECT_ID: ${{ secrets[github.ref == 'refs/heads/main' && 'GCP_PRODUCTION_PROJECT_ID' || 'GCP_DEV_PROJECT_ID'] }}
+      GCP_PROJECT_NUMBER: ${{ secrets[github.ref == 'refs/heads/main' && 'GCP_PRODUCTION_PROJECT_NUMBER' || 'GCP_DEV_PROJECT_NUMBER'] }}
       TARGET_ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'production' || 'dev' }}
-      WEBSITE_BUCKET: ${{ secrets.GCP_PROJECT_ID }}-${{ github.ref == 'refs/heads/main' && 'production' || 'dev' }}-web
+      WEBSITE_BUCKET: ${{ secrets[github.ref == 'refs/heads/main' && 'GCP_PRODUCTION_PROJECT_ID' || 'GCP_DEV_PROJECT_ID'] }}-${{ github.ref == 'refs/heads/main' && 'production' || 'dev' }}-web
       CDN_URL_MAP: my-website-${{ github.ref == 'refs/heads/main' && 'production' || 'dev' }}-url-map
       DEPLOY_SHA: ${{ github.sha }}
     steps:
       - name: Mask service-account emails
-        env:
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         run: |
           for environment in dev production; do
             for account in iac web plan; do
@@ -47,9 +46,9 @@ jobs:
           persist-credentials: false
       - uses: google-github-actions/auth@v3
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          workload_identity_provider: projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/my-website-${{ env.TARGET_ENVIRONMENT }}-github/providers/github
-          service_account: my-website-${{ env.TARGET_ENVIRONMENT }}-web@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/my-website-${{ env.TARGET_ENVIRONMENT }}-github/providers/github
+          service_account: my-website-${{ env.TARGET_ENVIRONMENT }}-web@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v3
       - name: Read the existing frontend address
         id: address

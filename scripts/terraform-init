@@ -2,32 +2,39 @@
 set -euo pipefail
 
 # Prepare state and GitHub authentication; Terraform runs later in Actions.
-if [[ $# != 4 ]]; then
-  echo "Usage: ./scripts/terraform-init <gcp-project-id> <github-owner/repo> <repository-id> <owner-id>" >&2
+if [[ $# != 5 ]]; then
+  echo "Usage: ./scripts/terraform-init <dev-project-id> <production-project-id> <github-owner/repo> <repository-id> <owner-id>" >&2
   exit 1
 fi
-project_id=$1
-github_repository=$2
-github_repository_id=$3
-github_repository_owner_id=$4
-# Federation identifies the project by its numeric ID.
-project_number=$(gcloud projects describe "$project_id" --format='value(projectNumber)')
-
-# Enable the services needed for authentication and website hosting.
-gcloud services enable serviceusage.googleapis.com cloudresourcemanager.googleapis.com \
-  storage.googleapis.com compute.googleapis.com iam.googleapis.com \
-  iamcredentials.googleapis.com sts.googleapis.com --project="$project_id"
+dev_project_id=$1
+production_project_id=$2
+github_repository=$3
+github_repository_id=$4
+github_repository_owner_id=$5
+if [[ "$dev_project_id" == "$production_project_id" ]]; then
+  echo "Use different GCP projects for dev and production." >&2
+  exit 1
+fi
 
 setup_environment() {
   local environment=$1
   local branch=$2
   local bucket=$3
+  local project_id=$4
+  local secret_prefix=$5
+  local project_number
+  project_number=$(gcloud projects describe "$project_id" --format='value(projectNumber)')
   local name="my-website-$environment"
   local pool="$name-github"
   local account="$name-iac@$project_id.iam.gserviceaccount.com"
   local principal="principalSet://iam.googleapis.com/projects/$project_number/locations/global/workloadIdentityPools/$pool"
 
   echo "Preparing $environment..."
+
+  # Enable authentication and hosting APIs in this environment's project.
+  gcloud services enable serviceusage.googleapis.com cloudresourcemanager.googleapis.com \
+    storage.googleapis.com compute.googleapis.com iam.googleapis.com \
+    iamcredentials.googleapis.com sts.googleapis.com --project="$project_id"
 
   # Reuse the state bucket only if it belongs to this project, or create it.
   if gcloud storage buckets describe "gs://$bucket" --project="$project_id" >/dev/null 2>&1; then
@@ -96,12 +103,12 @@ setup_environment() {
   # Allow Terraform to read, write, and lock its remote state.
   gcloud storage buckets add-iam-policy-binding "gs://$bucket" --project="$project_id" \
     --member="serviceAccount:$account" --role=roles/storage.objectAdmin
+
+  # Copy these values into repository-level GitHub Actions secrets.
+  printf '\nGCP_%s_PROJECT_ID=%s\nGCP_%s_PROJECT_NUMBER=%s\n' \
+    "$secret_prefix" "$project_id" "$secret_prefix" "$project_number"
 }
 
 # Prepare both environments with their branch and fixed state-bucket name.
-setup_environment dev develop my-website-iac-state-dev
-setup_environment production main my-website-iac-state-production
-
-# Copy these values into the repository's GitHub Actions secrets for log masking.
-printf '\nSet these GitHub Actions repository secrets:\nGCP_PROJECT_ID=%s\nGCP_PROJECT_NUMBER=%s\n' \
-  "$project_id" "$project_number"
+setup_environment dev develop my-website-iac-state-dev "$dev_project_id" DEV
+setup_environment production main my-website-iac-state-production "$production_project_id" PRODUCTION
