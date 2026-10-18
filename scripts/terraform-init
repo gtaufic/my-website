@@ -102,6 +102,6 @@ setup_environment() {
 setup_environment dev develop my-website-iac-state-dev
 setup_environment production main my-website-iac-state-production
 
-# Copy these values into the repository's GitHub Actions variables.
-printf '\nSet these GitHub Actions variables:\nGCP_PROJECT_ID=%s\nGCP_PROJECT_NUMBER=%s\n' \
+# Copy these values into the repository's GitHub Actions secrets for log masking.
+printf '\nSet these GitHub Actions repository secrets:\nGCP_PROJECT_ID=%s\nGCP_PROJECT_NUMBER=%s\n' \
   "$project_id" "$project_number"

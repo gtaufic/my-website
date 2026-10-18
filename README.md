@@ -14,12 +14,22 @@ flowchart LR
 
 ## Environments
 
-| Branch | Environment | Website deployment | IaC |
-| --- | --- | --- | --- |
-| `develop` | `dev` | Automatically on website changes merged/pushed to `develop`, or manually | Manual `plan` or `apply` from `develop` only |
-| `main` | `production` | Automatically on website changes merged/pushed to `main`, or manually | Manual `plan` or `apply` from `main` only |
+```mermaid
+flowchart TB
+    dev_pr["PR targeting develop"] --> dev_plan["iac pipeline<br/>Automatic plan for dev"]
+    dev_pr -->|Merge PR| develop["develop branch · dev"]
+    develop -->|Website changes pushed or merged, or manual run| dev_website["website pipeline<br/>Deploy files + invalidate CDN"]
+    develop -->|Manual run| dev_iac["iac pipeline<br/>Plan or apply for dev"]
+    develop -->|Open PR to main| production_pr["PR targeting main"]
+    production_pr --> production_plan["iac pipeline<br/>Automatic plan for production"]
+    production_pr -->|Merge PR| main["main branch · production"]
+    main -->|Website changes pushed or merged, or manual run| production_website["website pipeline<br/>Deploy files + invalidate CDN"]
+    main -->|Manual run| production_iac["iac pipeline<br/>Plan or apply for production"]
+```
 
 Default region: `us-east1`.
+
+PR plans use a read-only service account and appear in the workflow logs. Fork PRs run validation only. Applies remain manual.
 
 ## Repo Structure
 
@@ -27,8 +37,8 @@ Default region: `us-east1`.
 my-website/
 ├── .github/
 │   └── workflows/
-│       ├── iac.yml                  # Manual plan and apply
-│       └── website.yml              # HTML deployment and CDN invalidation
+│       ├── iac.yml                  # PR plans; manual plan and apply
+│       └── website.yml              # Website deployment and CDN invalidation
 ├── docs/
 │   └── images/                      # README images
 ├── iac/
@@ -59,6 +69,7 @@ my-website/
 │   ├── terraform-init               # Prepare state and GitHub authentication
 │   └── deploy-website.sh            # Upload, invalidate cache, and verify release
 ├── website/
+│   ├── assets/
 │   ├── index.html
 │   └── 404.html
 ├── .gitignore
@@ -97,14 +108,12 @@ curl -fsSL https://api.github.com/repos/gtaufic/my-website \
 
 ### GitHub Actions
 
-Add these repository-level Actions variables, shared by both environments:
+Add these repository-level Actions secrets, shared by both environments:
 
-**Settings → Secrets and variables → Actions → Variables → New repository variable**
+**Settings → Secrets and variables → Actions → Secrets → New repository secret**
 
 - `GCP_PROJECT_ID`: GCP project ID.
 - `GCP_PROJECT_NUMBER`: Numeric project number.
-
-![GitHub Actions repository variables with values blurred](docs/images/github-actions-variables.png)
 
 ## First run
 
@@ -122,7 +131,9 @@ After bootstrap, allow up to five minutes for IAM permissions to propagate.
 
 ![Deployed website with the IP address blurred](docs/images/website-preview.png)
 
-The first apply imports the bootstrap resources and creates the hosting stack and website deployment accounts. Later website changes deploy automatically.
+The first apply imports the bootstrap resources and creates the hosting stack and deployment accounts, including the read-only PR plan account. Later website changes deploy automatically.
+
+For an existing setup, run one manual **iac → apply** with these changes on each environment's branch before using automatic PR plans. This creates the plan account and updates federation.
 
 ## Next implementation steps
 
