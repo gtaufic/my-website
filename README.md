@@ -2,6 +2,12 @@
 
 A website hosted in Cloud Storage, served through a global external Application Load Balancer with Cloud CDN.
 
+```mermaid
+flowchart LR
+    visitor["Visitor"] <-->|HTTP| frontend["Global external Application Load Balancer<br/>Cloud CDN enabled"]
+    frontend <-->|Fetch content on cache miss| storage["Cloud Storage bucket<br/>Static HTML"]
+```
+
 - Terraform manages the cloud resources.
 - GitHub Actions deploys using Workload Identity Federation.
    - No service-account keys are needed.
@@ -23,6 +29,8 @@ my-website/
 │   └── workflows/
 │       ├── iac.yml                  # Manual plan and apply
 │       └── website.yml              # HTML deployment and CDN invalidation
+├── docs/
+│   └── images/                      # README images
 ├── iac/
 │   ├── .terraform.lock.hcl          # Provider versions and checksums (auto-gen)
 │   ├── state.tf                     # Remote state and protected state bucket
@@ -70,22 +78,39 @@ In Cloud Shell, run once with an administrative Google account and billing enabl
 git clone https://github.com/gtaufic/my-website.git
 cd my-website
 
+# Find your project ID and number
+# PROJECT_ID: my-website-xyz123
+# NAME: my-website
+# PROJECT_NUMBER: 1234567
+# ENVIRONMENT:
+gcloud projects list
+
+# Find repo id and owner id
+# {
+#   "repository_id": 1424364185,
+#   "owner_id": 67336406
+# }
+curl -fsSL https://api.github.com/repos/gtaufic/my-website \
+  | jq '{repository_id: .id, owner_id: .owner.id}'
+
 # ./scripts/terraform-init "<gcp project id>" "<github owner/repo>" "<repository id>" "<owner id>"
-./scripts/terraform-init "<gcp project id>" "gtaufic/my-website" "1424364185" "67336406"
+./scripts/terraform-init my-website-xyz123 gtaufic/my-website 1424364185 67336406
 ```
 
 ### GitHub Actions
 
 Allow up to five minutes after bootstrap for Google IAM changes to propagate.
 
-The IaC workflow passes the repository name and IDs to Terraform automatically using GitHub's built-in values.
+GitHub creates `dev` when you first run **iac** on `develop`, and `production` when you run it on `main`.
 
-Add these repository variables in GitHub Actions settings, using the values printed by the script:
+Repository details are detected automatically. Add the two variables printed by the bootstrap script as repository-level Actions variables, shared by both environments:
 
-| Variable | Value |
-| --- | --- |
-| `GCP_PROJECT_ID` | GCP project ID |
-| `GCP_PROJECT_NUMBER` | Numeric project number |
+**Settings → Secrets and variables → Actions → Variables → New repository variable**
+
+- `GCP_PROJECT_ID`: GCP project ID.
+- `GCP_PROJECT_NUMBER`: Numeric project number.
+
+![GitHub Actions repository variables with values blurred](docs/images/github-actions-variables.png)
 
 1. Manually run **iac** with operation **apply** on `develop` to set up dev.
 2. Repeat on `main` to set up production.
@@ -96,3 +121,4 @@ The first apply imports the bootstrap resources and creates the hosting stack. F
 ## Next steps
 
 1. Support custom domains with DNS configuration and managed HTTPS certificates.
+2. Deploy versioned web assets to support caching and rollbacks.
