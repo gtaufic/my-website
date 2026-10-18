@@ -13,7 +13,7 @@ flowchart LR
 - [Cloud Storage](iac/modules/static-website/storage.tf) holds the website assets, and [Cloud CDN](iac/modules/static-website/load-balancer.tf#L6-L20) caches responses to reduce repeated origin requests.
 - A [reserved global IP](iac/modules/static-website/load-balancer.tf#L1-L4) keeps the website endpoint stable across deployments.
 - Terraform manages storage, the load balancer, CDN, and IAM through a [reusable hosting module](iac/modules/static-website/) and [configurable inputs](iac/variables.tf).
-- [Dev](iac/environments/dev/) and [production](iac/environments/production/) use the same code with separate configuration, state buckets, and service accounts.
+- [Dev](iac/environments/dev/) and [production](iac/environments/production/) use the same code in separate GCP projects, with separate configuration, state buckets, and service accounts.
 - [Terraform state](iac/state.tf) is stored in private, versioned Cloud Storage buckets with state locking and protection against accidental deletion.
 - [GitHub Actions](.github/workflows/iac.yml) authenticates through [Workload Identity Federation](iac/iam.tf#L23-L51) using short-lived credentials. No service-account keys are needed.
 - Separate [service accounts](iac/iam.tf#L53-L70) handle read-only PR plans, IaC changes, and website deployment. Website uploads are [scoped to the website bucket](iac/iam.tf#L136-L140), and CDN access uses a [custom role](iac/iam.tf#L142-L154). IaC applies remain manual.
@@ -80,7 +80,9 @@ my-website/
 
 ### GCP
 
-In Cloud Shell, run once with an administrative Google account and billing enabled for the project. The script enables APIs, prepares private state buckets for dev and production, and configures GitHub federation and IaC service accounts.
+In Cloud Shell, run once with an administrative Google account that can manage both projects, with billing enabled for each. The script enables APIs, prepares each project's private state bucket, and configures GitHub federation and IaC service accounts.
+
+Use two existing projects: one for dev and one for production. This does not migrate existing resources; clean up the old setup first if the fixed state bucket names are still in the old project.
 
 This one-time bootstrap uses your signed-in Google account to establish remote state and GitHub access. Terraform then imports the bootstrap resources, and subsequent runs use federation without service-account keys. API enablement remains managed by the script.
 
@@ -104,18 +106,22 @@ gcloud projects list
 curl -fsSL https://api.github.com/repos/gtaufic/my-website \
   | jq '{repository_id: .id, owner_id: .owner.id}'
 
-# ./scripts/terraform-init "<gcp project id>" "<github owner/repo>" "<repository id>" "<owner id>"
-./scripts/terraform-init my-website-xyz123 gtaufic/my-website 1424364185 67336406
+# ./scripts/terraform-init "<dev project id>" "<production project id>" "<github owner/repo>" "<repository id>" "<owner id>"
+./scripts/terraform-init my-website-dev-xyz123 my-website-production-xyz123 gtaufic/my-website 1424364185 67336406
 ```
 
 ### GitHub Actions
 
-Add these repository-level Actions secrets, shared by both environments:
+Add the four repository-level Actions secrets printed by init. Workflows select the matching pair for `develop` (dev) or `main` (production), including PR target branches:
 
 **Settings → Secrets and variables → Actions → Secrets → New repository secret**
 
-- `GCP_PROJECT_ID`: GCP project ID.
-- `GCP_PROJECT_NUMBER`: Numeric project number.
+- `GCP_DEV_PROJECT_ID`: Dev project ID.
+- `GCP_DEV_PROJECT_NUMBER`: Dev project number.
+- `GCP_PRODUCTION_PROJECT_ID`: Production project ID.
+- `GCP_PRODUCTION_PROJECT_NUMBER`: Production project number.
+
+These replace the previous shared `GCP_PROJECT_ID` and `GCP_PROJECT_NUMBER` secrets.
 
 ## First run
 

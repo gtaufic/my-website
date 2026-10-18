@@ -63,7 +63,8 @@ jobs:
     env:
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "false"
-      TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+      TF_VAR_project_id: ${{ secrets[(github.base_ref == 'main' || github.ref == 'refs/heads/main') && 'GCP_PRODUCTION_PROJECT_ID' || 'GCP_DEV_PROJECT_ID'] }}
+      GCP_PROJECT_NUMBER: ${{ secrets[(github.base_ref == 'main' || github.ref == 'refs/heads/main') && 'GCP_PRODUCTION_PROJECT_NUMBER' || 'GCP_DEV_PROJECT_NUMBER'] }}
       TF_VAR_github_repository: ${{ github.repository }}
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_github_repository_owner_id: ${{ github.repository_owner_id }}
@@ -71,7 +72,7 @@ jobs:
     steps:
       - name: Mask service-account emails
         env:
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT_ID: ${{ env.TF_VAR_project_id }}
         run: |
           for environment in dev production; do
             for account in iac web plan; do
@@ -83,20 +84,19 @@ jobs:
           persist-credentials: false
       - name: Check project settings
         env:
-          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT_ID: ${{ env.TF_VAR_project_id }}
         run: |
-          : "${GCP_PROJECT_ID:?Set the GitHub repository secret GCP_PROJECT_ID.}"
-          [[ "$GCP_PROJECT_NUMBER" =~ ^[0-9]+$ ]] || { echo 'Set the GitHub repository secret GCP_PROJECT_NUMBER.' >&2; exit 1; }
+          : "${GCP_PROJECT_ID:?Set the project ID secret for this environment.}"
+          [[ "$GCP_PROJECT_NUMBER" =~ ^[0-9]+$ ]] || { echo 'Set the project number secret for this environment.' >&2; exit 1; }
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.16.6
           terraform_wrapper: false
       - uses: google-github-actions/auth@v3
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          workload_identity_provider: projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/my-website-${{ env.TARGET_ENVIRONMENT }}-github/providers/github
-          service_account: my-website-${{ env.TARGET_ENVIRONMENT }}-${{ github.event_name == 'pull_request' && 'plan' || 'iac' }}@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          project_id: ${{ env.TF_VAR_project_id }}
+          workload_identity_provider: projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/my-website-${{ env.TARGET_ENVIRONMENT }}-github/providers/github
+          service_account: my-website-${{ env.TARGET_ENVIRONMENT }}-${{ github.event_name == 'pull_request' && 'plan' || 'iac' }}@${{ env.TF_VAR_project_id }}.iam.gserviceaccount.com
       - name: Initialize remote state
         run: terraform -chdir=iac init -input=false -lockfile=readonly -backend-config="environments/$TARGET_ENVIRONMENT/state.hcl"
       # PR credentials can read state but cannot create a lock or write state.
