@@ -127,9 +127,37 @@ After bootstrap, allow up to five minutes for IAM permissions to propagate.
 2. Run **deploy** on `develop` to publish the HTML.
 3. Once these files are on `main`, repeat **iac → apply**, then **deploy**, on `main` for production.
 
-![Deployed website with the IP address blurred](docs/images/website-preview.png)
-
 The first apply imports the bootstrap resources and creates the hosting stack and deployment accounts, including the read-only PR plan account. Later website changes deploy automatically.
+
+**[First apply](https://github.com/gtaufic/my-website/actions/runs/39148919451)**
+
+[![Successful first Terraform apply](docs/images/first-apply.png)](https://github.com/gtaufic/my-website/actions/runs/39148919451)
+
+**[First deploy](https://github.com/gtaufic/my-website/actions/runs/39149186580)**
+
+[![First deployment in progress](docs/images/first-deploy.png)](https://github.com/gtaufic/my-website/actions/runs/39149186580)
+
+**Deployed version**
+
+![Deployed website version 1.0.1](docs/images/deployed-version.png)
+
+**Page update (v1.0.2)**
+
+Update the page version and replace the GIF, keeping its source credit.
+
+![HTML changes updating the page to version 1.0.2 and replacing the GIF](docs/images/page-update.png)
+
+**Automatic plan**
+
+The PR automatically runs a Terraform plan. This website-only update requires no infrastructure changes.
+
+![Successful automatic Terraform plan showing no infrastructure changes](docs/images/auto-plan.png)
+
+**Automatic deploy after merge**
+
+Merging the website update automatically triggers deployment and invalidates the CDN cache.
+
+![Successful automatic deployment after merging the website update](docs/images/auto-deploy.png)
 
 For an existing setup, run one manual **iac → apply** with these changes on each environment's branch before using automatic PR plans. This creates the plan account and updates federation.
 
@@ -137,3 +165,4 @@ For an existing setup, run one manual **iac → apply** with these changes on ea
 
 1. Support custom domains with DNS configuration and managed HTTPS certificates.
 2. Deploy versioned web assets to support caching and rollbacks.
+3. Deploy only when website content differs from the currently deployed version.
