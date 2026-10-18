@@ -3,7 +3,8 @@ set -euo pipefail
 
 # TEST-ONLY FULL CLEANUP for this repository's dedicated, disposable GCP projects.
 # Goal: leave no resources or ongoing costs from this setup behind. Deletes both
-# environments, GitHub CI identities, state buckets/history, and disables init APIs.
+# environments, GitHub CI identities, state buckets/history, and disables init APIs
+# and their dependent services.
 # Use only in this testing context, never in a shared or production project/account:
 # API disablement affects each entire project. The GCP projects are not deleted.
 # Run in Cloud Shell as an administrator; do not use an identity being destroyed.
@@ -104,8 +105,8 @@ for environment in dev production; do
   gcloud storage rm --recursive "gs://$bucket" --project="$project_id" --quiet
 done
 
-# Disable only the APIs listed in terraform-init, leaving Service Usage last.
-# Do not force-disable dependent services belonging to other applications.
+# Force-disable init APIs and their dependents in these disposable test projects.
+# Leave Service Usage last so the preceding disable operations can finish.
 projects=("$dev_project_id")
 if [[ "$production_project_id" != "$dev_project_id" ]]; then
   projects+=("$production_project_id")
@@ -119,6 +120,6 @@ for project_id in "${projects[@]}"; do
     iam.googleapis.com \
     cloudresourcemanager.googleapis.com \
     serviceusage.googleapis.com; do
-    gcloud services disable "$service" --project="$project_id" --quiet
+    gcloud services disable "$service" --project="$project_id" --force --quiet
   done
 done
