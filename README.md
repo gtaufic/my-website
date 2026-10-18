@@ -114,6 +114,14 @@ After bootstrap, allow up to five minutes for IAM permissions to propagate.
 2. Run **website** on `develop` to publish the HTML.
 3. Once these files are on `main`, repeat **iac → apply**, then **website**, on `main` for production.
 
+![Successful IaC workflow](docs/images/iac-first-run.png)
+
+![Terraform apply outputs with IPs and project references blurred](docs/images/iac-first-run-outputs.png)
+
+![Successful website deployment](docs/images/website-first-run.png)
+
+![Deployed website with the IP address blurred](docs/images/website-preview.png)
+
 The first apply imports the bootstrap resources and creates the hosting stack and website deployment accounts. Later website changes deploy automatically.
 
 ## Next implementation steps
