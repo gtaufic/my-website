@@ -1,0 +1,55 @@
+name: website
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - "website/**"
+      - "scripts/deploy-website.sh"
+      - ".github/workflows/website.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Do not upload while an IaC apply is running for the same environment.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'dev' }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      TARGET_ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'production' || 'dev' }}
+      WEBSITE_BUCKET: ${{ vars.GCP_PROJECT_ID }}-${{ github.ref == 'refs/heads/main' && 'production' || 'dev' }}-web
+      CDN_URL_MAP: my-website-${{ github.ref == 'refs/heads/main' && 'production' || 'dev' }}-url-map
+      DEPLOY_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/my-website-${{ env.TARGET_ENVIRONMENT }}-github/providers/github
+          service_account: my-website-${{ env.TARGET_ENVIRONMENT }}-web@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Read the existing frontend address
+        id: address
+        run: |
+          ip=$(gcloud compute addresses describe "my-website-$TARGET_ENVIRONMENT-ip" \
+            --global --project="$GCP_PROJECT_ID" --format='value(address)')
+          [[ -n "$ip" ]] || { echo 'Run the manual IaC apply before publishing the website.' >&2; exit 1; }
+          printf 'url=http://%s\n' "$ip" >> "$GITHUB_OUTPUT"
+      - name: Upload HTML, invalidate CDN, and verify release
+        env:
+          WEBSITE_URL: ${{ steps.address.outputs.url }}
+        run: bash scripts/deploy-website.sh
