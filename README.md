@@ -12,24 +12,36 @@ flowchart LR
 - GitHub Actions deploys using Workload Identity Federation.
    - No service-account keys are needed.
 
-## Environments
+## IaC and Deploy flow
+
+There are two environments: `dev`, based on the `develop` branch, and `production`, based on the `main` branch.
 
 ```mermaid
 flowchart TB
-    dev_pr["PR targeting develop"] --> dev_plan["iac pipeline<br/>Automatic plan for dev"]
+    dev_pr["PR targeting develop"] -->|Automatic plan| dev_plan["IaC pipeline<br/>Automatic plan for dev"]
     dev_pr -->|Merge PR| develop["develop branch · dev"]
-    develop -->|Website changes pushed or merged, or manual run| dev_website["website pipeline<br/>Deploy files + invalidate CDN"]
-    develop -->|Manual run| dev_iac["iac pipeline<br/>Plan or apply for dev"]
+    develop -->|Website changes pushed or merged, or manual run| dev_website["deploy pipeline<br/>Deploy files + invalidate CDN"]
+    develop -->|Manual run| dev_iac["IaC pipeline<br/>Plan or apply for dev"]
     develop -->|Open PR to main| production_pr["PR targeting main"]
-    production_pr --> production_plan["iac pipeline<br/>Automatic plan for production"]
+    production_pr -->|Automatic plan| production_plan["IaC pipeline<br/>Automatic plan for production"]
     production_pr -->|Merge PR| main["main branch · production"]
-    main -->|Website changes pushed or merged, or manual run| production_website["website pipeline<br/>Deploy files + invalidate CDN"]
-    main -->|Manual run| production_iac["iac pipeline<br/>Plan or apply for production"]
+    main -->|Website changes pushed or merged, or manual run| production_website["deploy pipeline<br/>Deploy files + invalidate CDN"]
+    main -->|Manual run| production_iac["IaC pipeline<br/>Plan or apply for production"]
+
+    classDef dev fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef production fill:#ffedd5,stroke:#ea580c,color:#7c2d12
+    class dev_pr,dev_plan,develop,dev_website,dev_iac dev
+    class production_pr,production_plan,main,production_website,production_iac production
+
+    %% Operation colors: plan, merge, deploy, manual run, and open PR.
+    linkStyle 0,5 stroke:#2563eb,color:#2563eb,stroke-width:2px
+    linkStyle 1,6 stroke:#7c3aed,color:#7c3aed,stroke-width:2px
+    linkStyle 2,7 stroke:#0891b2,color:#0891b2,stroke-width:2px
+    linkStyle 3,8 stroke:#16a34a,color:#16a34a,stroke-width:2px
+    linkStyle 4 stroke:#d97706,color:#d97706,stroke-width:2px
 ```
 
 Default region: `us-east1`.
-
-PR plans use a read-only service account and appear in the workflow logs. Fork PRs run validation only. Applies remain manual.
 
 ## Repo Structure
 
@@ -38,7 +50,7 @@ my-website/
 ├── .github/
 │   └── workflows/
 │       ├── iac.yml                  # PR plans; manual plan and apply
-│       └── website.yml              # Website deployment and CDN invalidation
+│       └── website.yml              # deploy: website files and CDN invalidation
 ├── docs/
 │   └── images/                      # README images
 ├── iac/
@@ -120,14 +132,8 @@ Add these repository-level Actions secrets, shared by both environments:
 After bootstrap, allow up to five minutes for IAM permissions to propagate.
 
 1. Open **Actions → iac → Run workflow**, select `develop` and operation `apply`, and wait for success.
-2. Run **website** on `develop` to publish the HTML.
-3. Once these files are on `main`, repeat **iac → apply**, then **website**, on `main` for production.
-
-![Successful IaC workflow](docs/images/iac-first-run.png)
-
-![Terraform apply outputs with IPs and project references blurred](docs/images/iac-first-run-outputs.png)
-
-![Successful website deployment](docs/images/website-first-run.png)
+2. Run **deploy** on `develop` to publish the HTML.
+3. Once these files are on `main`, repeat **iac → apply**, then **deploy**, on `main` for production.
 
 ![Deployed website with the IP address blurred](docs/images/website-preview.png)
 
