@@ -4,6 +4,8 @@ A website hosted in Cloud Storage, served through a global external Application 
 
 This project explores a simple way to serve static application assets, such as those produced by a React build. The goal is reliable delivery with low latency worldwide and easy releases whenever the assets change. The initial solution was built in a few hours.
 
+Last published dev endpoint: [http://136.68.16.48/](http://136.68.16.48/). This temporary testing environment may be shut down soon.
+
 ```mermaid
 flowchart LR
     visitor["Visitor"] <-->|HTTP| frontend["Global external Application Load Balancer<br/>Cloud CDN enabled"]
