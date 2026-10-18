@@ -67,11 +67,9 @@ my-website/
 
 ## Setup
 
-Make these files available on `main` and `develop` before starting. GitHub requires manual workflows to exist on the default branch (`main`).
-
 ### GCP
 
-In Cloud Shell, run once with an administrative Google account and billing enabled for the project. The script enables APIs, prepares both private state buckets, and configures GitHub federation and IaC service accounts.
+In Cloud Shell, run once with an administrative Google account and billing enabled for the project. The script enables APIs, prepares private state buckets for dev and production, and configures GitHub federation and IaC service accounts.
 
 ```bash
 # For a fork or another repository, use its clone URL and pass its name and numeric IDs below.
@@ -99,11 +97,7 @@ curl -fsSL https://api.github.com/repos/gtaufic/my-website \
 
 ### GitHub Actions
 
-Allow up to five minutes after bootstrap for Google IAM changes to propagate.
-
-GitHub creates `dev` when you first run **iac** on `develop`, and `production` when you run it on `main`.
-
-Repository details are detected automatically. Add the two variables printed by the bootstrap script as repository-level Actions variables, shared by both environments:
+Add these repository-level Actions variables, shared by both environments:
 
 **Settings → Secrets and variables → Actions → Variables → New repository variable**
 
@@ -112,13 +106,17 @@ Repository details are detected automatically. Add the two variables printed by 
 
 ![GitHub Actions repository variables with values blurred](docs/images/github-actions-variables.png)
 
-1. Manually run **iac** with operation **apply** on `develop` to set up dev.
-2. Repeat on `main` to set up production.
-3. Run **website** on each branch to publish the HTML.
+## First run
 
-The first apply imports the bootstrap resources and creates the hosting stack. Future website changes deploy automatically as described above.
+After bootstrap, allow up to five minutes for IAM permissions to propagate.
 
-## Next steps
+1. Open **Actions → iac → Run workflow**, select `develop` and operation `apply`, and wait for success.
+2. Run **website** on `develop` to publish the HTML.
+3. Once these files are on `main`, repeat **iac → apply**, then **website**, on `main` for production.
+
+The first apply imports the bootstrap resources and creates the hosting stack and website deployment accounts. Later website changes deploy automatically.
+
+## Next implementation steps
 
 1. Support custom domains with DNS configuration and managed HTTPS certificates.
 2. Deploy versioned web assets to support caching and rollbacks.
