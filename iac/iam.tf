@@ -32,15 +32,16 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "attribute.repository_owner_id" = "assertion.repository_owner_id"
     "attribute.ref"                 = "assertion.ref"
     "attribute.workflow_ref"        = "assertion.workflow_ref"
+    "attribute.plan_workflow"       = "assertion.event_name == 'pull_request' ? assertion.workflow_ref.extract('{path}@') : ''"
   }
 
   # Environment subjects alone do not prove the branch. Check both claims and
-  # the repository's immutable IDs. Pull requests/forks cannot get credentials.
+  # the repository's immutable IDs. PRs must target this environment's branch;
+  # only the read-only plan account accepts their workflow identity.
   attribute_condition = join(" && ", [
     "assertion.repository_id == '${var.github_repository_id}'",
     "assertion.repository_owner_id == '${var.github_repository_owner_id}'",
-    "assertion.ref == 'refs/heads/${local.deployment_branch}'",
-    "assertion.event_name in ['push', 'workflow_dispatch']",
+    "((assertion.ref == 'refs/heads/${local.deployment_branch}' && assertion.event_name in ['push', 'workflow_dispatch']) || (assertion.event_name == 'pull_request' && assertion.base_ref == '${local.deployment_branch}' && assertion.ref.startsWith('refs/pull/') && assertion.ref.endsWith('/merge')))",
     "assertion.sub.endsWith(':environment:${var.environment}')",
   ])
 
@@ -59,6 +60,36 @@ resource "google_service_account" "website" {
   project      = var.project_id
   account_id   = "${local.name}-web"
   display_name = "GitHub website (${var.environment})"
+}
+
+# PR code gets read access only, even if it changes the plan command.
+resource "google_service_account" "plan" {
+  project      = var.project_id
+  account_id   = "${local.name}-plan"
+  display_name = "GitHub Terraform plan (${var.environment})"
+}
+
+resource "google_service_account_iam_member" "plan_federation" {
+  service_account_id = google_service_account.plan.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.plan_workflow/${var.github_repository}/.github/workflows/iac.yml"
+}
+
+resource "google_project_iam_member" "plan" {
+  for_each = toset([
+    "roles/viewer",
+    "roles/iam.securityReviewer",
+    "roles/serviceusage.serviceUsageConsumer",
+  ])
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.plan.email}"
+}
+
+resource "google_storage_bucket_iam_member" "plan_state" {
+  bucket = google_storage_bucket.state.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.plan.email}"
 }
 
 locals {

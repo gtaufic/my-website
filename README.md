@@ -12,12 +12,34 @@ flowchart LR
 - GitHub Actions deploys using Workload Identity Federation.
    - No service-account keys are needed.
 
-## Environments
+## IaC and Deploy flow
 
-| Branch | Environment | Website deployment | IaC |
-| --- | --- | --- | --- |
-| `develop` | `dev` | Automatically on website changes merged/pushed to `develop`, or manually | Manual `plan` or `apply` from `develop` only |
-| `main` | `production` | Automatically on website changes merged/pushed to `main`, or manually | Manual `plan` or `apply` from `main` only |
+There are two environments: `dev`, based on the `develop` branch, and `production`, based on the `main` branch.
+
+```mermaid
+flowchart TB
+    dev_pr["PR targeting develop"] -->|Automatic plan| dev_plan["IaC pipeline<br/>Automatic plan for dev"]
+    dev_pr -->|Merge PR| develop["develop branch · dev"]
+    develop -->|Website changes pushed or merged, or manual run| dev_website["deploy pipeline<br/>Deploy files + invalidate CDN"]
+    develop -->|Manual run| dev_iac["IaC pipeline<br/>Plan or apply for dev"]
+    develop -->|Open PR to main| production_pr["PR targeting main"]
+    production_pr -->|Automatic plan| production_plan["IaC pipeline<br/>Automatic plan for production"]
+    production_pr -->|Merge PR| main["main branch · production"]
+    main -->|Website changes pushed or merged, or manual run| production_website["deploy pipeline<br/>Deploy files + invalidate CDN"]
+    main -->|Manual run| production_iac["IaC pipeline<br/>Plan or apply for production"]
+
+    classDef dev fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef production fill:#ffedd5,stroke:#ea580c,color:#7c2d12
+    class dev_pr,dev_plan,develop,dev_website,dev_iac dev
+    class production_pr,production_plan,main,production_website,production_iac production
+
+    %% Operation colors: plan, merge, deploy, manual run, and open PR.
+    linkStyle 0,5 stroke:#2563eb,color:#2563eb,stroke-width:2px
+    linkStyle 1,6 stroke:#7c3aed,color:#7c3aed,stroke-width:2px
+    linkStyle 2,7 stroke:#0891b2,color:#0891b2,stroke-width:2px
+    linkStyle 3,8 stroke:#16a34a,color:#16a34a,stroke-width:2px
+    linkStyle 4 stroke:#d97706,color:#d97706,stroke-width:2px
+```
 
 Default region: `us-east1`.
 
@@ -27,8 +49,8 @@ Default region: `us-east1`.
 my-website/
 ├── .github/
 │   └── workflows/
-│       ├── iac.yml                  # Manual plan and apply
-│       └── website.yml              # HTML deployment and CDN invalidation
+│       ├── iac.yml                  # PR plans; manual plan and apply
+│       └── website.yml              # deploy: website files and CDN invalidation
 ├── docs/
 │   └── images/                      # README images
 ├── iac/
@@ -59,6 +81,7 @@ my-website/
 │   ├── terraform-init               # Prepare state and GitHub authentication
 │   └── deploy-website.sh            # Upload, invalidate cache, and verify release
 ├── website/
+│   ├── assets/
 │   ├── index.html
 │   └── 404.html
 ├── .gitignore
@@ -97,32 +120,26 @@ curl -fsSL https://api.github.com/repos/gtaufic/my-website \
 
 ### GitHub Actions
 
-Add these repository-level Actions variables, shared by both environments:
+Add these repository-level Actions secrets, shared by both environments:
 
-**Settings → Secrets and variables → Actions → Variables → New repository variable**
+**Settings → Secrets and variables → Actions → Secrets → New repository secret**
 
 - `GCP_PROJECT_ID`: GCP project ID.
 - `GCP_PROJECT_NUMBER`: Numeric project number.
-
-![GitHub Actions repository variables with values blurred](docs/images/github-actions-variables.png)
 
 ## First run
 
 After bootstrap, allow up to five minutes for IAM permissions to propagate.
 
 1. Open **Actions → iac → Run workflow**, select `develop` and operation `apply`, and wait for success.
-2. Run **website** on `develop` to publish the HTML.
-3. Once these files are on `main`, repeat **iac → apply**, then **website**, on `main` for production.
-
-![Successful IaC workflow](docs/images/iac-first-run.png)
-
-![Terraform apply outputs with IPs and project references blurred](docs/images/iac-first-run-outputs.png)
-
-![Successful website deployment](docs/images/website-first-run.png)
+2. Run **deploy** on `develop` to publish the HTML.
+3. Once these files are on `main`, repeat **iac → apply**, then **deploy**, on `main` for production.
 
 ![Deployed website with the IP address blurred](docs/images/website-preview.png)
 
-The first apply imports the bootstrap resources and creates the hosting stack and website deployment accounts. Later website changes deploy automatically.
+The first apply imports the bootstrap resources and creates the hosting stack and deployment accounts, including the read-only PR plan account. Later website changes deploy automatically.
+
+For an existing setup, run one manual **iac → apply** with these changes on each environment's branch before using automatic PR plans. This creates the plan account and updates federation.
 
 ## Next implementation steps
 

@@ -15,6 +15,8 @@ sed "s/__DEPLOY_SHA__/$DEPLOY_SHA/g" "$repo_root/website/index.html" > "$stage/i
 cache_control='public,max-age=0,s-maxage=300,must-revalidate'
 
 # Publish the entry page last. Browsers revalidate; CDN caches for five minutes.
+gcloud storage cp --recursive "$repo_root/website/assets" "gs://$WEBSITE_BUCKET/" \
+  --project="$GCP_PROJECT_ID" --cache-control="$cache_control"
 gcloud storage cp "$repo_root/website/404.html" "gs://$WEBSITE_BUCKET/404.html" \
   --project="$GCP_PROJECT_ID" --content-type=text/html --cache-control="$cache_control"
 gcloud storage cp "$stage/index.html" "gs://$WEBSITE_BUCKET/index.html" \
