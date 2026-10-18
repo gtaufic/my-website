@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# TEST-ONLY FULL CLEANUP for this repository's dedicated, disposable GCP project.
+# Goal: leave no resources or ongoing costs from this setup behind. Deletes both
+# environments, GitHub CI identities, state buckets/history, and disables init APIs.
+# Use only in this testing context, never in a shared or production project/account:
+# API disablement affects the entire project. The GCP project itself is not deleted.
+# Run in Cloud Shell as an administrator; do not use an identity being destroyed.
+if [[ $# != 4 ]]; then
+  echo "Usage: ./scripts/terraform-destroy <gcp-project-id> <github-owner/repo> <repository-id> <owner-id>" >&2
+  exit 1
+fi
+export TF_VAR_project_id=$1
+export TF_VAR_github_repository=$2
+export TF_VAR_github_repository_id=$3
+export TF_VAR_github_repository_owner_id=$4
+iac_directory=$(cd "$(dirname "${BASH_SOURCE[0]}")/../iac" && pwd)
+
+echo "Destroying dev and production, deleting state history, and disabling init APIs in $TF_VAR_project_id."
+
+# Verify bucket ownership before deleting any resources or state.
+project_number=$(gcloud projects describe "$TF_VAR_project_id" --format='value(projectNumber)')
+for bucket in my-website-iac-state-dev my-website-iac-state-production; do
+  bucket_project=$(gcloud storage buckets describe "gs://$bucket" --raw --format='value(projectNumber)')
+  if [[ "$bucket_project" != "$project_number" ]]; then
+    echo "Bucket $bucket belongs to a different project." >&2
+    exit 1
+  fi
+done
+
+# Keep both backends available until all Terraform operations finish.
+for environment in dev production; do
+  echo "Preparing to destroy $environment..."
+  terraform -chdir="$iac_directory" init -input=false -reconfigure -lockfile=readonly \
+    -backend-config="environments/$environment/state.hcl"
+
+  resources=$(terraform -chdir="$iac_directory" state list)
+  if [[ -z "$resources" ]]; then
+    echo "No managed resources in $environment."
+    continue
+  fi
+
+  # Refuse to operate on another project's state.
+  state_project=$(terraform -chdir="$iac_directory" output -raw project_id)
+  if [[ "$state_project" != "$TF_VAR_project_id" ]]; then
+    echo "The $environment state belongs to a different project." >&2
+    exit 1
+  fi
+
+  # Persist permission to delete website objects, including previous versions.
+  if printf '%s\n' "$resources" | grep -Fxq 'module.static_website.google_storage_bucket.website'; then
+    terraform -chdir="$iac_directory" apply -input=false -auto-approve -lock-timeout=5m \
+      -var-file="environments/$environment/terraform.tfvars" \
+      -var=website_force_destroy=true \
+      -target=module.static_website.google_storage_bucket.website
+  fi
+
+  # Bypass prevent_destroy; the backend bucket is deleted separately afterward.
+  if printf '%s\n' "$resources" | grep -Fxq 'google_storage_bucket.state'; then
+    terraform -chdir="$iac_directory" state rm -lock-timeout=5m google_storage_bucket.state
+  fi
+
+  # Terraform displays the destruction plan and asks for confirmation.
+  terraform -chdir="$iac_directory" destroy -lock-timeout=5m \
+    -var-file="environments/$environment/terraform.tfvars" \
+    -var=website_force_destroy=true
+done
+
+# Remove the state buckets and all object versions after successful teardown.
+for bucket in my-website-iac-state-dev my-website-iac-state-production; do
+  gcloud storage buckets update "gs://$bucket" --clear-soft-delete --project="$TF_VAR_project_id"
+  gcloud storage rm --recursive "gs://$bucket" --project="$TF_VAR_project_id" --quiet
+done
+
+# Disable only the APIs listed in terraform-init, leaving Service Usage last.
+# Do not force-disable dependent services belonging to other applications.
+for service in \
+  compute.googleapis.com \
+  storage.googleapis.com \
+  iamcredentials.googleapis.com \
+  sts.googleapis.com \
+  iam.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  serviceusage.googleapis.com; do
+  gcloud services disable "$service" --project="$TF_VAR_project_id" --quiet
+done
