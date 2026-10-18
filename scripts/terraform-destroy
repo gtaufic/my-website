@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# TEST-ONLY FULL CLEANUP for this repository's dedicated, disposable GCP project.
+# TEST-ONLY FULL CLEANUP for this repository's dedicated, disposable GCP projects.
 # Goal: leave no resources or ongoing costs from this setup behind. Deletes both
 # environments, GitHub CI identities, state buckets/history, and disables init APIs.
 # Use only in this testing context, never in a shared or production project/account:
-# API disablement affects the entire project. The GCP project itself is not deleted.
+# API disablement affects each entire project. The GCP projects are not deleted.
 # Run in Cloud Shell as an administrator; do not use an identity being destroyed.
-if [[ $# != 4 ]]; then
-  echo "Usage: ./scripts/terraform-destroy <gcp-project-id> <github-owner/repo> <repository-id> <owner-id>" >&2
+if [[ $# != 5 ]]; then
+  echo "Usage: ./scripts/terraform-destroy <dev-project-id> <production-project-id> <github-owner/repo> <repository-id> <owner-id>" >&2
   exit 1
 fi
 
@@ -28,17 +28,28 @@ if ! "$terraform_command" version 2>/dev/null | grep -q '^Terraform v'; then
   terraform_command="$terraform_directory/terraform"
 fi
 
-export TF_VAR_project_id=$1
-export TF_VAR_github_repository=$2
-export TF_VAR_github_repository_id=$3
-export TF_VAR_github_repository_owner_id=$4
+dev_project_id=$1
+production_project_id=$2
+export TF_VAR_github_repository=$3
+export TF_VAR_github_repository_id=$4
+export TF_VAR_github_repository_owner_id=$5
 iac_directory=$(cd "$(dirname "${BASH_SOURCE[0]}")/../iac" && pwd)
 
-echo "Destroying dev and production, deleting state history, and disabling init APIs in $TF_VAR_project_id."
+project_for_environment() {
+  if [[ "$1" == dev ]]; then
+    printf '%s\n' "$dev_project_id"
+  else
+    printf '%s\n' "$production_project_id"
+  fi
+}
+
+echo "Destroying dev in $dev_project_id and production in $production_project_id, including state history and init APIs."
 
 # Verify bucket ownership before deleting any resources or state.
-project_number=$(gcloud projects describe "$TF_VAR_project_id" --format='value(projectNumber)')
-for bucket in my-website-iac-state-dev my-website-iac-state-production; do
+for environment in dev production; do
+  project_id=$(project_for_environment "$environment")
+  project_number=$(gcloud projects describe "$project_id" --format='value(projectNumber)')
+  bucket="my-website-iac-state-$environment"
   bucket_project=$(gcloud storage buckets describe "gs://$bucket" --raw --format='value(projectNumber)')
   if [[ "$bucket_project" != "$project_number" ]]; then
     echo "Bucket $bucket belongs to a different project." >&2
@@ -48,6 +59,7 @@ done
 
 # Keep both backends available until all Terraform operations finish.
 for environment in dev production; do
+  export TF_VAR_project_id=$(project_for_environment "$environment")
   echo "Preparing to destroy $environment..."
   "$terraform_command" -chdir="$iac_directory" init -input=false -reconfigure -lockfile=readonly \
     -backend-config="environments/$environment/state.hcl"
@@ -85,20 +97,28 @@ for environment in dev production; do
 done
 
 # Remove the state buckets and all object versions after successful teardown.
-for bucket in my-website-iac-state-dev my-website-iac-state-production; do
-  gcloud storage buckets update "gs://$bucket" --clear-soft-delete --project="$TF_VAR_project_id"
-  gcloud storage rm --recursive "gs://$bucket" --project="$TF_VAR_project_id" --quiet
+for environment in dev production; do
+  project_id=$(project_for_environment "$environment")
+  bucket="my-website-iac-state-$environment"
+  gcloud storage buckets update "gs://$bucket" --clear-soft-delete --project="$project_id"
+  gcloud storage rm --recursive "gs://$bucket" --project="$project_id" --quiet
 done
 
 # Disable only the APIs listed in terraform-init, leaving Service Usage last.
 # Do not force-disable dependent services belonging to other applications.
-for service in \
-  compute.googleapis.com \
-  storage.googleapis.com \
-  iamcredentials.googleapis.com \
-  sts.googleapis.com \
-  iam.googleapis.com \
-  cloudresourcemanager.googleapis.com \
-  serviceusage.googleapis.com; do
-  gcloud services disable "$service" --project="$TF_VAR_project_id" --quiet
+projects=("$dev_project_id")
+if [[ "$production_project_id" != "$dev_project_id" ]]; then
+  projects+=("$production_project_id")
+fi
+for project_id in "${projects[@]}"; do
+  for service in \
+    compute.googleapis.com \
+    storage.googleapis.com \
+    iamcredentials.googleapis.com \
+    sts.googleapis.com \
+    iam.googleapis.com \
+    cloudresourcemanager.googleapis.com \
+    serviceusage.googleapis.com; do
+    gcloud services disable "$service" --project="$project_id" --quiet
+  done
 done
