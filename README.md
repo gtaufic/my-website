@@ -52,7 +52,7 @@ my-website/
 │       ├── iac.yml                  # PR plans; manual plan and apply
 │       └── website.yml              # deploy: website files and CDN invalidation
 ├── docs/
-│   └── images/                      # README images
+│   └── images/                      # Step-by-step screenshots
 ├── iac/
 │   ├── .terraform.lock.hcl          # Provider versions and checksums (auto-gen)
 │   ├── state.tf                     # Remote state and protected state bucket
@@ -135,9 +135,19 @@ After bootstrap, allow up to five minutes for IAM permissions to propagate.
 2. Run **deploy** on `develop` to publish the HTML.
 3. Once these files are on `main`, repeat **iac → apply**, then **deploy**, on `main` for production.
 
-![Deployed website with the IP address blurred](docs/images/website-preview.png)
-
 The first apply imports the bootstrap resources and creates the hosting stack and deployment accounts, including the read-only PR plan account. Later website changes deploy automatically.
+
+**[First apply (production)](https://github.com/gtaufic/my-website/actions/runs/39148919451)**
+
+[![Successful first Terraform apply in production](docs/images/first-apply.png)](https://github.com/gtaufic/my-website/actions/runs/39148919451)
+
+**[First deploy (production)](https://github.com/gtaufic/my-website/actions/runs/39149186580)**
+
+[![First deployment to production in progress](docs/images/first-deploy.png)](https://github.com/gtaufic/my-website/actions/runs/39149186580)
+
+**Deployed version (production)**
+
+![Deployed website version 1.0.1 in production](docs/images/deployed-version.png)
 
 For an existing setup, run one manual **iac → apply** with these changes on each environment's branch before using automatic PR plans. This creates the plan account and updates federation.
 
