@@ -16,29 +16,39 @@ flowchart LR
 
 There are two environments: `dev`, based on the `develop` branch, and `production`, based on the `main` branch.
 
+Apply IaC once per environment before its first deployment.
+
 ```mermaid
-flowchart TB
-    dev_pr["PR targeting develop"] -->|Automatic plan| dev_plan["IaC pipeline<br/>Automatic plan for dev"]
-    dev_pr -->|Merge PR| develop["develop branch · dev"]
-    develop -->|Website changes pushed or merged, or manual run| dev_website["deploy pipeline<br/>Deploy files + invalidate CDN"]
-    develop -->|Manual run| dev_iac["IaC pipeline<br/>Plan or apply for dev"]
-    develop -->|Open PR to main| production_pr["PR targeting main"]
-    production_pr -->|Automatic plan| production_plan["IaC pipeline<br/>Automatic plan for production"]
-    production_pr -->|Merge PR| main["main branch · production"]
-    main -->|Website changes pushed or merged, or manual run| production_website["deploy pipeline<br/>Deploy files + invalidate CDN"]
-    main -->|Manual run| production_iac["IaC pipeline<br/>Plan or apply for production"]
+flowchart LR
+    subgraph iac_lane["IaC"]
+        direction TB
+        iac_dev["develop · dev"] -->|PR to develop| dev_plan["Auto plan"]
+        iac_dev -->|Manual| dev_apply["Plan / apply"]
+        iac_dev -->|Merge PR to main| iac_prod["main · production"]
+        iac_prod -->|PR to main| prod_plan["Auto plan"]
+        iac_prod -->|Manual| prod_apply["Plan / apply"]
+    end
+
+    subgraph deploy_lane["Deploy"]
+        direction TB
+        deploy_dev["develop · dev"] -->|Website push / merge, or manual| dev_release["Upload → invalidate CDN → verify"]
+        deploy_dev -->|Merge PR to main| deploy_prod["main · production"]
+        deploy_prod -->|Website push / merge, or manual| prod_release["Upload → invalidate CDN → verify"]
+    end
+
+    iac_lane ~~~ deploy_lane
 
     classDef dev fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
     classDef production fill:#ffedd5,stroke:#ea580c,color:#7c2d12
-    class dev_pr,dev_plan,develop,dev_website,dev_iac dev
-    class production_pr,production_plan,main,production_website,production_iac production
+    class iac_dev,dev_plan,dev_apply,deploy_dev,dev_release dev
+    class iac_prod,prod_plan,prod_apply,deploy_prod,prod_release production
+    style iac_lane fill:#f8fafc,stroke:#64748b,color:#0f172a
+    style deploy_lane fill:#f8fafc,stroke:#64748b,color:#0f172a
 
-    %% Operation colors: plan, merge, deploy, manual run, and open PR.
-    linkStyle 0,5 stroke:#2563eb,color:#2563eb,stroke-width:2px
-    linkStyle 1,6 stroke:#7c3aed,color:#7c3aed,stroke-width:2px
-    linkStyle 2,7 stroke:#0891b2,color:#0891b2,stroke-width:2px
-    linkStyle 3,8 stroke:#16a34a,color:#16a34a,stroke-width:2px
-    linkStyle 4 stroke:#d97706,color:#d97706,stroke-width:2px
+    linkStyle 0,3 stroke:#2563eb,color:#2563eb,stroke-width:2px
+    linkStyle 1,4 stroke:#16a34a,color:#16a34a,stroke-width:2px
+    linkStyle 2,6 stroke:#7c3aed,color:#7c3aed,stroke-width:2px
+    linkStyle 5,7 stroke:#0891b2,color:#0891b2,stroke-width:2px
 ```
 
 Default region: `us-east1`.
@@ -148,6 +158,12 @@ The first apply imports the bootstrap resources and creates the hosting stack an
 **Deployed version (production)**
 
 ![Deployed website version 1.0.1 in production](docs/images/deployed-version.png)
+
+**Page update (v1.0.2)**
+
+Update the page version and replace the GIF, keeping its source credit.
+
+![HTML changes updating the page to version 1.0.2 and replacing the GIF](docs/images/page-update.png)
 
 For an existing setup, run one manual **iac → apply** with these changes on each environment's branch before using automatic PR plans. This creates the plan account and updates federation.
 
