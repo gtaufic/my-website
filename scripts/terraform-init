@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Prepare state and GitHub authentication; Terraform runs later in Actions.
+if [[ $# != 4 ]]; then
+  echo "Usage: ./scripts/terraform-init <gcp-project-id> <github-owner/repo> <repository-id> <owner-id>" >&2
+  exit 1
+fi
+project_id=$1
+github_repository=$2
+github_repository_id=$3
+github_repository_owner_id=$4
+# Federation identifies the project by its numeric ID.
+project_number=$(gcloud projects describe "$project_id" --format='value(projectNumber)')
+
+# Enable the services needed for authentication and website hosting.
+gcloud services enable serviceusage.googleapis.com cloudresourcemanager.googleapis.com \
+  storage.googleapis.com compute.googleapis.com iam.googleapis.com \
+  iamcredentials.googleapis.com sts.googleapis.com --project="$project_id"
+
+setup_environment() {
+  local environment=$1
+  local branch=$2
+  local bucket=$3
+  local name="my-website-$environment"
+  local pool="$name-github"
+  local account="$name-iac@$project_id.iam.gserviceaccount.com"
+  local principal="principalSet://iam.googleapis.com/projects/$project_number/locations/global/workloadIdentityPools/$pool"
+
+  echo "Preparing $environment..."
+
+  # Reuse the state bucket only if it belongs to this project, or create it.
+  if gcloud storage buckets describe "gs://$bucket" --project="$project_id" >/dev/null 2>&1; then
+    local bucket_project
+    bucket_project=$(gcloud storage buckets describe "gs://$bucket" --raw --format='value(projectNumber)')
+    if [[ "$bucket_project" != "$project_number" ]]; then
+      echo "Bucket $bucket belongs to another project." >&2
+      exit 1
+    fi
+  else
+    gcloud storage buckets create "gs://$bucket" --project="$project_id" \
+      --location=us-east1 --default-storage-class=STANDARD \
+      --uniform-bucket-level-access --public-access-prevention
+  fi
+  # Keep state private and retain previous versions for recovery.
+  gcloud storage buckets update "gs://$bucket" --project="$project_id" \
+    --uniform-bucket-level-access --public-access-prevention --versioning
+
+  # Give each environment its own federation pool.
+  if ! gcloud iam workload-identity-pools describe "$pool" \
+    --location=global --project="$project_id" >/dev/null 2>&1; then
+    gcloud iam workload-identity-pools create "$pool" --location=global \
+      --display-name="GitHub $environment" --project="$project_id"
+  fi
+
+  # Trust GitHub tokens from this repository, branch, and environment.
+  # Numeric repository and owner IDs prevent trust transferring to a reused name.
+  # Repository details come from the command arguments, including for forks.
+  if ! gcloud iam workload-identity-pools providers describe github \
+    --workload-identity-pool="$pool" --location=global --project="$project_id" >/dev/null 2>&1; then
+    gcloud iam workload-identity-pools providers create-oidc github \
+      --workload-identity-pool="$pool" --location=global --project="$project_id" \
+      --display-name='GitHub Actions' --issuer-uri=https://token.actions.githubusercontent.com \
+      --attribute-mapping="google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.repository_owner_id=assertion.repository_owner_id,attribute.ref=assertion.ref,attribute.workflow_ref=assertion.workflow_ref" \
+      --attribute-condition="assertion.repository_id == '$github_repository_id' &&
+        assertion.repository_owner_id == '$github_repository_owner_id' &&
+        assertion.ref == 'refs/heads/$branch' &&
+        assertion.event_name in ['push', 'workflow_dispatch'] &&
+        assertion.sub.endsWith(':environment:$environment')"
+  fi
+
+  # Terraform uses this account to manage the environment's resources.
+  if ! gcloud iam service-accounts describe "$account" --project="$project_id" >/dev/null 2>&1; then
+    gcloud iam service-accounts create "$name-iac" \
+      --display-name="GitHub IaC ($environment)" --project="$project_id"
+  fi
+
+  # Allow only the IaC workflow on the matching branch to use this account.
+  gcloud iam service-accounts add-iam-policy-binding "$account" --project="$project_id" \
+    --role=roles/iam.workloadIdentityUser \
+    --member="$principal/attribute.workflow_ref/$github_repository/.github/workflows/iac.yml@refs/heads/$branch"
+
+  # Grant permissions to manage hosting, federation, service accounts, and IAM.
+  for role in \
+    roles/compute.loadBalancerAdmin \
+    roles/iam.roleAdmin \
+    roles/iam.serviceAccountAdmin \
+    roles/iam.workloadIdentityPoolAdmin \
+    roles/resourcemanager.projectIamAdmin \
+    roles/serviceusage.serviceUsageConsumer \
+    roles/storage.admin; do
+    gcloud projects add-iam-policy-binding "$project_id" \
+      --member="serviceAccount:$account" --role="$role" --condition=None >/dev/null
+  done
+
+  # Allow Terraform to read, write, and lock its remote state.
+  gcloud storage buckets add-iam-policy-binding "gs://$bucket" --project="$project_id" \
+    --member="serviceAccount:$account" --role=roles/storage.objectAdmin
+}
+
+# Prepare both environments with their branch and fixed state-bucket name.
+setup_environment dev develop my-website-iac-state-dev
+setup_environment production main my-website-iac-state-production
+
+# Copy these values into the repository's GitHub Actions variables.
+printf '\nSet these GitHub Actions variables:\nGCP_PROJECT_ID=%s\nGCP_PROJECT_NUMBER=%s\n' \
+  "$project_id" "$project_number"

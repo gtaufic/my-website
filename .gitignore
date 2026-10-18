@@ -1,0 +1,18 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+gha-creds-*.json
+*service-account*.json
+*.auto.tfvars
+*.auto.tfvars.json
+.env
+.env.*
+!.env.example
+.DS_Store
+__pycache__/
+*.pyc
+# Commit iac/.terraform.lock.hcl and the non-secret environment configuration.
